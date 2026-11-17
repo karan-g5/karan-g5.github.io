@@ -206,14 +206,14 @@
 
     ul.items { list-style: none; }
     .list-head, .item {
-      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 36%) 34px;
+      display: grid; grid-template-columns: 22px minmax(0, 1fr) minmax(0, 34%) 34px;
       align-items: center; column-gap: 12px;
     }
     .list-head {
       padding: 0 6px 6px; border-bottom: 1px solid var(--line);
       font-size: 0.8rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
     }
-    .list-head span:first-child { padding-left: 40px; }
+    .list-head span:nth-child(2) { padding-left: 40px; }
     .item {
       padding: 12px 6px;
       border-bottom: 1px solid var(--line);
@@ -233,6 +233,19 @@
     .item input:checked + .box { background: var(--rose-deep); border-color: var(--rose-deep); color: #fff; }
     .item input:focus-visible + .box { box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.4); }
     .text { font-size: 1.25rem; overflow-wrap: anywhere; transition: color 0.25s; }
+    .handle {
+      border: 0; background: none; padding: 6px 0; font-size: 1.1rem; line-height: 1;
+      color: var(--rose); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+      border-radius: 6px; letter-spacing: -2px;
+    }
+    .handle:hover { color: var(--rose-deep); }
+    .handle:focus-visible { outline: 2px solid var(--rose); }
+    .items.sorting .item { animation: none; }
+    .items.sorting, .items.sorting * { cursor: grabbing; }
+    .item.dragging {
+      background: rgba(255, 255, 255, 0.95); border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(184, 92, 118, 0.25); position: relative; z-index: 2;
+    }
     .item.done .text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--rose); }
     .del {
       flex: none; border: 0; background: none; cursor: pointer;
@@ -312,7 +325,7 @@
 
         <div class="filters" id="filters" role="group" aria-label="Filter by type"></div>
 
-        <div class="list-head" id="list-head"><span>Item</span><span>Type</span></div>
+        <div class="list-head" id="list-head"><span></span><span>Item</span><span>Type</span></div>
         <ul class="items" id="items"></ul>
 
         <details class="done-wrap" id="done-wrap">
@@ -514,9 +527,84 @@
       remote(() => db.from("checklist_items").update({ type, updated_at: new Date().toISOString() }).eq("id", item.id));
     }
 
-    function itemRow(item) {
+    // ---------- Reordering ----------
+    // Order is stored in created_at (the list is sorted by it), so no extra database column is needed.
+    const ORDER_BASE = Date.UTC(2026, 0, 1);
+    let dragging = false;
+
+    function applyOrder(ids) {
+      const before = state.items.map(i => i.id).join();
+      // Put the reordered items back into the slots they occupied in the full list.
+      const byId = Object.fromEntries(state.items.map(i => [i.id, i]));
+      const slots = state.items.map((i, n) => ids.includes(i.id) ? n : -1).filter(n => n >= 0);
+      slots.forEach((slot, k) => { state.items[slot] = byId[ids[k]]; });
+      if (state.items.map(i => i.id).join() === before) return;
+      state.items.forEach((i, n) => { i.created_at = new Date(ORDER_BASE + n * 1000).toISOString(); });
+      save(); render();
+      const rows = state.items.map(i => ({ id: i.id, text: i.text, type: i.type, done: i.done, created_at: i.created_at }));
+      remote(() => db.from("checklist_items").upsert(rows, { onConflict: "id" }));
+    }
+
+    function startDrag(e, li, handle) {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      dragging = true;
+      li.classList.add("dragging");
+      $list.classList.add("sorting");
+      const onMove = ev => {
+        const y = ev.clientY;
+        if (y < 60) window.scrollBy(0, -12); else if (y > window.innerHeight - 60) window.scrollBy(0, 12);
+        let target = null;
+        for (const sib of $list.querySelectorAll(".item:not(.dragging)")) {
+          const r = sib.getBoundingClientRect();
+          if (y < r.top + r.height / 2) { target = sib; break; }
+        }
+        if (target) { if (li.nextElementSibling !== target) $list.insertBefore(li, target); }
+        else if ($list.lastElementChild !== li) $list.appendChild(li);
+      };
+      const onUp = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+        li.classList.remove("dragging");
+        $list.classList.remove("sorting");
+        dragging = false;
+        applyOrder([...$list.querySelectorAll(".item")].map(el => el.dataset.id));
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
+    }
+
+    // Keyboard: arrow up/down on the grip moves the item.
+    function nudge(e, item) {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      const ids = [...$list.querySelectorAll(".item")].map(el => el.dataset.id);
+      const i = ids.indexOf(item.id), j = i + (e.key === "ArrowUp" ? -1 : 1);
+      if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      applyOrder(ids);
+      $list.querySelector(`.item[data-id="${CSS.escape(item.id)}"] .handle`)?.focus();
+    }
+
+    function itemRow(item, sortable) {
       const li = document.createElement("li");
       li.className = "item" + (item.done ? " done" : "");
+      li.dataset.id = item.id;
+
+      let grip;
+      if (sortable) {
+        grip = document.createElement("button");
+        grip.type = "button"; grip.className = "handle"; grip.textContent = "⋮⋮";
+        grip.title = "Drag to reorder";
+        grip.setAttribute("aria-label", `Move ${item.text} (use arrow keys)`);
+        grip.addEventListener("pointerdown", e => startDrag(e, li, grip));
+        grip.addEventListener("keydown", e => nudge(e, item));
+      } else {
+        grip = document.createElement("span");
+      }
 
       const label = document.createElement("label");
       const cb = document.createElement("input");
@@ -551,7 +639,7 @@
         remote(() => db.from("checklist_items").delete().eq("id", item.id));
       });
 
-      li.append(label, tag, del);
+      li.append(grip, label, tag, del);
       return li;
     }
 
@@ -590,11 +678,11 @@
           ? '<li class="empty">Everything here is done ♡</li>'
           : '<li class="empty">Nothing here yet — add your first item above.</li>';
       }
-      for (const item of pending) $list.appendChild(itemRow(item));
+      for (const item of pending) $list.appendChild(itemRow(item, pending.length > 1));
       $listHead.hidden = !pending.length;
 
       $doneList.innerHTML = "";
-      for (const item of finished) $doneList.appendChild(itemRow(item));
+      for (const item of finished) $doneList.appendChild(itemRow(item, false));
       $doneCount.textContent = `(${finished.length})`;
       $doneWrap.hidden = !finished.length;
 
@@ -612,7 +700,7 @@
       const text = capFirst($newItem.value.trim());
       if (!text) { $newItem.focus(); return; }
       const type = canonicalType($newType.value || (state.filter !== ALL ? state.filter : ""));
-      const item = { id: uid(), text, type, done: false };
+      const item = { id: uid(), text, type, done: false, created_at: new Date().toISOString() };
       if (type === PRIVATE_TYPE && !unlocked) { setStatus("err", "That type isn't available"); return; }
       state.items.push(item);
       remote(() => db.from("checklist_items").insert(item));
@@ -642,7 +730,7 @@
 
     async function fetchRemote() {
       const [it, ty] = await Promise.all([
-        db.from("checklist_items").select("id,text,type,done").order("created_at").order("id"),
+        db.from("checklist_items").select("id,text,type,done,created_at").order("created_at").order("id"),
         db.from("checklist_types").select("name").order("created_at")
       ]);
       if (it.error) throw it.error;
@@ -654,7 +742,7 @@
     async function pull() {
       if (!db) { setStatus("err", "Offline — changes are saved on this device only"); return false; }
       // Don't redraw under someone who is mid-way through renaming a type.
-      if (document.querySelector(".tag-input")) { schedulePull(); return true; }
+      if (dragging || document.querySelector(".tag-input")) { schedulePull(); return true; }
       if (pulling) { pullAgain = true; return true; }
       pulling = true;
       try {
