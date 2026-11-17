@@ -235,6 +235,8 @@
     .item:hover .del, .del:focus-visible { opacity: 1; }
     .del:hover { color: var(--rose-deep); }
     @media (hover: none) { .del { opacity: 0.7; } }
+    .sync-status { text-align: center; font-style: italic; font-size: 0.95rem; color: var(--muted); margin-top: 18px; min-height: 1.2em; }
+    .sync-status[data-kind="err"] { color: var(--rose-deep); }
     .empty { text-align: center; color: var(--muted); font-style: italic; padding: 16px 0; }
 
     footer { text-align: center; padding: 0 16px 40px; color: var(--muted); font-style: italic; }
@@ -277,12 +279,14 @@
         <div class="filters" id="filters" role="group" aria-label="Filter by type"></div>
 
         <ul class="items" id="items"></ul>
+        <p class="sync-status" id="sync-status" aria-live="polite"></p>
       </div>
     </section>
 
     <footer>made with love ♡</footer>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script>
     // ---------- Countdown ----------
     // Wedding day starts at midnight India time (IST, UTC+05:30).
@@ -307,7 +311,10 @@
     const timerId = setInterval(tick, 1000);
     tick();
 
-    // ---------- Checklist (saved in this browser via localStorage) ----------
+    // ---------- Checklist (shared across devices via Supabase; cached on this device) ----------
+    const SUPABASE_URL = "https://afppvbxmexxntckvbtcc.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_Qt6nru9Bz-H9_giCk036Kg_edrEo9ul"; // publishable key: safe in the page
+    const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
     const STORAGE_KEY = "kp-wedding-checklist-v1";
     const ALL = "All";
     const FALLBACK_TYPE = "General";
@@ -325,7 +332,7 @@
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
     function load() {
-      let items = null, types = [], filter = ALL, makeupMoved = false;
+      let items = null, types = [], filter = ALL, makeupMoved = false, syncedOnce = false;
       try {
         const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
         if (Array.isArray(parsed)) {
@@ -335,6 +342,7 @@
           if (Array.isArray(parsed.types)) types = parsed.types;
           if (typeof parsed.filter === "string") filter = parsed.filter;
           makeupMoved = parsed.makeupMoved === true;
+          syncedOnce = parsed.syncedOnce === true;
         }
       } catch (e) { /* storage unavailable or corrupt: fall back to defaults */ }
       if (!items) { makeupMoved = true; items = DEFAULT_ITEMS.map(([text, type]) => ({ id: uid(), text, type, done: false })); }
@@ -344,7 +352,7 @@
       for (const it of items) {
         if (!types.some(t => t.toLowerCase() === it.type.toLowerCase())) types.push(it.type);
       }
-      return { items, types, filter, makeupMoved };
+      return { items, types, filter, makeupMoved, syncedOnce };
     }
     function save() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -367,11 +375,11 @@
 
     // Reuse an existing type's spelling when it matches case-insensitively; remember new ones.
     function canonicalType(raw) {
-      const t = capFirst((raw || "").trim().replace(/\s+/g, " "));
-      if (!t) return FALLBACK_TYPE;
+      const t = capFirst((raw || "").trim().replace(/\s+/g, " ")) || FALLBACK_TYPE;
       const existing = state.types.find(x => x.toLowerCase() === t.toLowerCase());
       if (existing) return existing;
       state.types.push(t);
+      remote(() => db.from("checklist_types").upsert({ name: t }, { onConflict: "name", ignoreDuplicates: true }));
       return t;
     }
 
@@ -413,7 +421,13 @@
       const finish = commit => {
         if (finished) return;
         finished = true;
-        if (commit) item.type = canonicalType(input.value);
+        if (commit) {
+          const type = canonicalType(input.value);
+          if (type !== item.type) {
+            item.type = type;
+            remote(() => db.from("checklist_items").update({ type, updated_at: new Date().toISOString() }).eq("id", item.id));
+          }
+        }
         save(); render();
       };
       input.addEventListener("keydown", e => {
@@ -467,6 +481,7 @@
         cb.addEventListener("change", () => {
           item.done = cb.checked;
           save(); render();
+          remote(() => db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
         });
         const box = document.createElement("span");
         box.className = "box"; box.textContent = "✓";
@@ -491,6 +506,7 @@
           if (!confirm('Remove "' + item.text + '" from the list?')) return;
           state.items = state.items.filter(i => i.id !== item.id);
           save(); render();
+          remote(() => db.from("checklist_items").delete().eq("id", item.id));
         });
 
         li.append(main, del);
@@ -511,7 +527,9 @@
       const text = capFirst($newItem.value.trim());
       if (!text) { $newItem.focus(); return; }
       const type = canonicalType($newType.value || (state.filter !== ALL ? state.filter : ""));
-      state.items.push({ id: uid(), text, type, done: false });
+      const item = { id: uid(), text, type, done: false };
+      state.items.push(item);
+      remote(() => db.from("checklist_items").insert(item));
       // Keep the new item visible if a different type is filtered.
       if (state.filter !== ALL && state.filter !== type) state.filter = type;
       $newType.value = state.filter === ALL ? "" : state.filter;
@@ -522,6 +540,91 @@
 
     if (state.filter !== ALL) $newType.value = state.filter;
     render();
+
+    // ---------- Sync with Supabase ----------
+    const $status = document.getElementById("sync-status");
+    function setStatus(kind, msg) { $status.dataset.kind = kind; $status.textContent = msg; }
+
+    function mergeTypes(names, items) {
+      const out = [];
+      for (const t of [...names, ...items.map(i => i.type)]) {
+        if (!out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);
+      }
+      return out;
+    }
+
+    async function fetchRemote() {
+      const [it, ty] = await Promise.all([
+        db.from("checklist_items").select("id,text,type,done").order("created_at").order("id"),
+        db.from("checklist_types").select("name").order("created_at")
+      ]);
+      if (it.error) throw it.error;
+      if (ty.error) throw ty.error;
+      return { items: it.data, types: ty.data.map(t => t.name) };
+    }
+
+    let pulling = false, pullAgain = false;
+    async function pull() {
+      if (!db) { setStatus("err", "Offline — changes are saved on this device only"); return false; }
+      // Don't redraw under someone who is mid-way through renaming a type.
+      if (document.querySelector(".tag-input")) { schedulePull(); return true; }
+      if (pulling) { pullAgain = true; return true; }
+      pulling = true;
+      try {
+        let data = await fetchRemote();
+        if (!data.items.length && !state.syncedOnce && state.items.length) {
+          // First time the list goes online: upload what this device already has.
+          const base = Date.now();
+          const types = mergeTypes(state.types, state.items);
+          let r = await db.from("checklist_types").upsert(types.map(name => ({ name })), { onConflict: "name", ignoreDuplicates: true });
+          if (r.error) throw r.error;
+          r = await db.from("checklist_items").upsert(
+            state.items.map((i, n) => ({ id: i.id, text: i.text, type: i.type, done: i.done, created_at: new Date(base + n).toISOString() })),
+            { onConflict: "id" });
+          if (r.error) throw r.error;
+          data = await fetchRemote();
+        }
+        state.items = data.items;
+        state.types = mergeTypes(data.types, data.items);
+        state.syncedOnce = true;
+        save(); render();
+        setStatus("ok", "Shared across your devices ✓");
+        return true;
+      } catch (e) {
+        console.error(e);
+        setStatus("err", "Can't reach the shared list right now — showing the last saved copy");
+        return false;
+      } finally {
+        pulling = false;
+        if (pullAgain) { pullAgain = false; schedulePull(); }
+      }
+    }
+
+    let pullTimer;
+    function schedulePull() { clearTimeout(pullTimer); pullTimer = setTimeout(pull, 300); }
+
+    // Send one change to Supabase; if it fails, reload the shared list so the page shows the truth.
+    async function remote(op) {
+      if (!db) return;
+      try {
+        const { error } = await op();
+        if (error) throw error;
+      } catch (e) {
+        console.error(e);
+        await pull();
+        setStatus("err", "Couldn't save that change — please check your connection and try again");
+      }
+    }
+
+    if (db) {
+      db.channel("wedding-checklist")
+        .on("postgres_changes", { event: "*", schema: "public", table: "checklist_items" }, schedulePull)
+        .on("postgres_changes", { event: "*", schema: "public", table: "checklist_types" }, schedulePull)
+        .subscribe();
+      // Phones pause live updates in the background; catch up when the page is shown again.
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) schedulePull(); });
+    }
+    pull();
 
     // ---------- Petals ----------
     if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
