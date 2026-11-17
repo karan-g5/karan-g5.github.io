@@ -255,6 +255,24 @@
     .done-wrap .count { color: var(--muted); font-style: italic; }
     .empty { text-align: center; color: var(--muted); font-style: italic; padding: 16px 0; }
 
+    .secret { border: 0; background: none; font: inherit; color: inherit; cursor: default; padding: 0 2px; }
+    .pw-dialog {
+      margin: auto; border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 22px;
+      padding: 26px 24px 20px; width: min(340px, calc(100% - 32px));
+      background: var(--cream); color: var(--ink);
+      box-shadow: 0 20px 60px rgba(110, 42, 64, 0.25);
+    }
+    .pw-dialog::backdrop { background: rgba(110, 42, 64, 0.25); backdrop-filter: blur(4px); }
+    .pw-title { font-family: "Great Vibes", cursive; font-size: 2.2rem; color: var(--rose-deep); text-align: center; line-height: 1.1; margin-bottom: 14px; }
+    .pw-dialog input {
+      width: 100%; font: inherit; font-size: 1.15rem; padding: 10px 14px;
+      border: 1px solid var(--line); border-radius: 12px; outline: none; background: #fff; color: var(--ink);
+    }
+    .pw-dialog input:focus { border-color: var(--rose); box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.25); }
+    .pw-error { min-height: 1.3em; color: var(--rose-deep); font-style: italic; font-size: 0.95rem; margin: 6px 2px; }
+    .pw-actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .pw-actions button { font: inherit; font-size: 1.05rem; padding: 8px 18px; border-radius: 12px; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--wine); }
+    .pw-actions button[type="submit"] { border: 0; color: #fff; background: linear-gradient(135deg, var(--rose), var(--rose-deep)); }
     footer { text-align: center; padding: 0 16px 40px; color: var(--muted); font-style: italic; }
   </style>
 </head>
@@ -305,7 +323,19 @@
       </div>
     </section>
 
-    <footer>made with love ♡</footer>
+    <footer>made with love <button type="button" class="secret" id="secret" aria-label="Heart">♡</button></footer>
+
+    <dialog class="pw-dialog" id="pw-dialog">
+      <form id="pw-form">
+        <p class="pw-title">Just for us ♡</p>
+        <input id="pw-input" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />
+        <p class="pw-error" id="pw-error" aria-live="polite"></p>
+        <div class="pw-actions">
+          <button type="button" id="pw-cancel">Cancel</button>
+          <button type="submit">Open</button>
+        </div>
+      </form>
+    </dialog>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -351,6 +381,16 @@
       ["Night dhol", "Marriage Essentials"]
     ];
     const DEFAULT_TYPE_BY_TEXT = Object.fromEntries(DEFAULT_ITEMS.map(([t, ty]) => [t.toLowerCase(), ty]));
+    // Password-protected type: its items live in a private Supabase table, reachable only with the password.
+    const PRIVATE_TYPE = "MyMoments";
+    const PW_KEY = "kp-moments-pw"; // sessionStorage: unlocked until this tab is closed
+    let privatePw = null;
+    try { privatePw = sessionStorage.getItem(PW_KEY); } catch (e) { /* ignore */ }
+    let privateItems = [];
+    const isPrivate = item => item.type === PRIVATE_TYPE;
+    const allItems = () => privatePw ? [...state.items, ...privateItems] : state.items;
+    const rpc = (fn, args) => db.rpc(fn, { pw: privatePw, ...args });
+
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
     function load() {
@@ -399,6 +439,7 @@
     // Reuse an existing type's spelling when it matches case-insensitively; remember new ones.
     function canonicalType(raw) {
       const t = capFirst((raw || "").trim().replace(/\s+/g, " ")) || FALLBACK_TYPE;
+      if (t.toLowerCase() === PRIVATE_TYPE.toLowerCase()) return PRIVATE_TYPE; // never stored publicly
       const existing = state.types.find(x => x.toLowerCase() === t.toLowerCase());
       if (existing) return existing;
       state.types.push(t);
@@ -454,10 +495,7 @@
         finished = true;
         if (commit) {
           const type = canonicalType(input.value);
-          if (type !== item.type) {
-            item.type = type;
-            remote(() => db.from("checklist_items").update({ type, updated_at: new Date().toISOString() }).eq("id", item.id));
-          }
+          if (type !== item.type) changeType(item, type);
         }
         save(); render();
       };
@@ -468,6 +506,33 @@
       input.addEventListener("blur", () => finish(true));
       tagBtn.replaceWith(input);
       input.focus(); input.select();
+    }
+
+    // Change an item's type, moving it between the public and private tables when needed.
+    function changeType(item, type) {
+      const wasPrivate = isPrivate(item), nowPrivate = type === PRIVATE_TYPE;
+      if (nowPrivate && !privatePw) { setStatus("err", "That type isn't available"); return; }
+      if (!wasPrivate && !nowPrivate) {
+        item.type = type;
+        remote(() => db.from("checklist_items").update({ type, updated_at: new Date().toISOString() }).eq("id", item.id));
+      } else if (wasPrivate) {
+        privateItems = privateItems.filter(i => i !== item);
+        item.type = type;
+        state.items.push(item);
+        remote(async () => {
+          const r = await db.from("checklist_items").insert({ id: item.id, text: item.text, type, done: item.done });
+          return r.error ? r : rpc("moments_delete", { item_id: item.id });
+        });
+      } else {
+        state.items = state.items.filter(i => i !== item);
+        item.type = type;
+        privateItems.push(item);
+        remote(async () => {
+          let r = await rpc("moments_add", { item_id: item.id, item_text: item.text });
+          if (!r.error && item.done) r = await rpc("moments_set_done", { item_id: item.id, is_done: true });
+          return r.error ? r : db.from("checklist_items").delete().eq("id", item.id);
+        });
+      }
     }
 
     function itemRow(item) {
@@ -481,7 +546,9 @@
       cb.addEventListener("change", () => {
         item.done = cb.checked;
         save(); render();
-        remote(() => db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
+        remote(() => isPrivate(item)
+          ? rpc("moments_set_done", { item_id: item.id, is_done: item.done })
+          : db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
       });
       const box = document.createElement("span");
       box.className = "box"; box.textContent = "✓";
@@ -502,9 +569,14 @@
       del.textContent = "×";
       del.addEventListener("click", () => {
         if (!confirm('Remove "' + item.text + '" from the list?')) return;
-        state.items = state.items.filter(i => i.id !== item.id);
+        if (isPrivate(item)) {
+          privateItems = privateItems.filter(i => i.id !== item.id);
+          remote(() => rpc("moments_delete", { item_id: item.id }));
+        } else {
+          state.items = state.items.filter(i => i.id !== item.id);
+          remote(() => db.from("checklist_items").delete().eq("id", item.id));
+        }
         save(); render();
-        remote(() => db.from("checklist_items").delete().eq("id", item.id));
       });
 
       li.append(label, tag, del);
@@ -512,13 +584,15 @@
     }
 
     function render() {
-      // Types currently in use, in the order they were first added.
-      const inUse = state.types.filter(t => state.items.some(i => i.type === t));
+      const items = allItems();
+      // Types currently in use, in the order they were first added (MyMoments always shown once unlocked).
+      const inUse = state.types.filter(t => items.some(i => i.type === t));
+      if (privatePw) inUse.push(PRIVATE_TYPE);
       if (state.filter !== ALL && !inUse.includes(state.filter)) state.filter = ALL;
 
       // Suggestions for the type fields.
       $typeList.innerHTML = "";
-      for (const t of state.types) {
+      for (const t of privatePw ? [...state.types, PRIVATE_TYPE] : state.types) {
         const o = document.createElement("option");
         o.value = t; $typeList.appendChild(o);
       }
@@ -526,15 +600,15 @@
       // Filter chips.
       $filters.innerHTML = "";
       const doneOf = arr => arr.filter(i => i.done).length;
-      $filters.appendChild(chip(ALL, ALL, doneOf(state.items), state.items.length));
+      $filters.appendChild(chip(ALL, ALL, doneOf(items), items.length));
       for (const t of inUse) {
-        const ofType = state.items.filter(i => i.type === t);
+        const ofType = items.filter(i => i.type === t);
         $filters.appendChild(chip(t, t, doneOf(ofType), ofType.length));
       }
-      $filters.hidden = state.items.length === 0;
+      $filters.hidden = items.length === 0 && !privatePw;
 
       // Items: still to do in the main list, finished ones in the expandable "Done" list.
-      const visible = state.filter === ALL ? state.items : state.items.filter(i => i.type === state.filter);
+      const visible = state.filter === ALL ? items : items.filter(i => i.type === state.filter);
       const pending = visible.filter(i => !i.done);
       const finished = visible.filter(i => i.done);
 
@@ -567,8 +641,14 @@
       if (!text) { $newItem.focus(); return; }
       const type = canonicalType($newType.value || (state.filter !== ALL ? state.filter : ""));
       const item = { id: uid(), text, type, done: false };
-      state.items.push(item);
-      remote(() => db.from("checklist_items").insert(item));
+      if (type === PRIVATE_TYPE) {
+        if (!privatePw) { setStatus("err", "That type isn't available"); return; }
+        privateItems.push(item);
+        remote(() => rpc("moments_add", { item_id: item.id, item_text: item.text }));
+      } else {
+        state.items.push(item);
+        remote(() => db.from("checklist_items").insert(item));
+      }
       // Keep the new item visible if a different type is filtered.
       if (state.filter !== ALL && state.filter !== type) state.filter = type;
       $newType.value = state.filter === ALL ? "" : state.filter;
@@ -623,6 +703,7 @@
           if (r.error) throw r.error;
           data = await fetchRemote();
         }
+        await pullPrivate();
         state.items = data.items;
         state.types = mergeTypes(data.types, data.items);
         state.syncedOnce = true;
@@ -638,6 +719,57 @@
         if (pullAgain) { pullAgain = false; schedulePull(); }
       }
     }
+
+    async function pullPrivate() {
+      if (!privatePw || !db) return;
+      const { data, error } = await db.rpc("moments_list", { pw: privatePw });
+      if (error) {
+        if (error.code === "28P01") { lock(); return; } // password changed elsewhere
+        throw error;
+      }
+      privateItems = data.map(r => ({ ...r, type: PRIVATE_TYPE }));
+    }
+
+    // ---------- Hidden MyMoments lock (the ♡ in the footer) ----------
+    const $pwDialog = document.getElementById("pw-dialog");
+    const $pwInput = document.getElementById("pw-input");
+    const $pwError = document.getElementById("pw-error");
+
+    function lock() {
+      privatePw = null;
+      privateItems = [];
+      try { sessionStorage.removeItem(PW_KEY); } catch (e) { /* ignore */ }
+      if (state.filter === PRIVATE_TYPE) setFilter(ALL); else render();
+    }
+
+    document.getElementById("secret").addEventListener("click", () => {
+      if (privatePw) {
+        if (confirm("Hide MyMoments again?")) lock();
+        return;
+      }
+      $pwInput.value = ""; $pwError.textContent = "";
+      $pwDialog.showModal();
+      $pwInput.focus();
+    });
+    document.getElementById("pw-cancel").addEventListener("click", () => $pwDialog.close());
+    document.getElementById("pw-form").addEventListener("submit", async e => {
+      e.preventDefault();
+      const pw = $pwInput.value;
+      if (!pw) return;
+      if (!db) { $pwError.textContent = "Needs an internet connection"; return; }
+      $pwError.textContent = "Checking…";
+      const { data, error } = await db.rpc("moments_list", { pw });
+      if (error) {
+        $pwError.textContent = error.code === "28P01" ? "That's not it ♡" : "Couldn't check right now — try again";
+        $pwInput.select();
+        return;
+      }
+      privatePw = pw;
+      try { sessionStorage.setItem(PW_KEY, pw); } catch (e) { /* ignore */ }
+      privateItems = data.map(r => ({ ...r, type: PRIVATE_TYPE }));
+      $pwDialog.close();
+      setFilter(PRIVATE_TYPE);
+    });
 
     let pullTimer;
     function schedulePull() { clearTimeout(pullTimer); pullTimer = setTimeout(pull, 300); }
