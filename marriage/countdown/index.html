@@ -268,8 +268,8 @@
         <div class="bar"><span id="bar"></span></div>
 
         <form class="add" id="add-form" autocomplete="off">
-          <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="120" aria-label="New checklist item" />
-          <input id="new-type" type="text" list="type-list" placeholder="Type, e.g. Marriage Essentials" maxlength="60" aria-label="Item type" />
+          <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="120" autocapitalize="sentences" aria-label="New checklist item" />
+          <input id="new-type" type="text" list="type-list" placeholder="Type, e.g. Marriage Essentials" maxlength="60" autocapitalize="words" aria-label="Item type" />
           <button type="submit">Add</button>
         </form>
         <datalist id="type-list"></datalist>
@@ -352,9 +352,11 @@
     const state = load();
     save();
 
+    const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
+
     // Reuse an existing type's spelling when it matches case-insensitively; remember new ones.
     function canonicalType(raw) {
-      const t = (raw || "").trim().replace(/\s+/g, " ");
+      const t = capFirst((raw || "").trim().replace(/\s+/g, " "));
       if (!t) return FALLBACK_TYPE;
       const existing = state.types.find(x => x.toLowerCase() === t.toLowerCase());
       if (existing) return existing;
@@ -394,6 +396,7 @@
       input.setAttribute("list", "type-list");
       input.setAttribute("aria-label", "Type for " + item.text);
       input.maxLength = 60;
+      input.setAttribute("autocapitalize", "words");
       input.value = item.type;
       let finished = false;
       const finish = commit => {
@@ -494,7 +497,7 @@
 
     document.getElementById("add-form").addEventListener("submit", e => {
       e.preventDefault();
-      const text = $newItem.value.trim();
+      const text = capFirst($newItem.value.trim());
       if (!text) { $newItem.focus(); return; }
       const type = canonicalType($newType.value || (state.filter !== ALL ? state.filter : ""));
       state.items.push({ id: uid(), text, type, done: false });
