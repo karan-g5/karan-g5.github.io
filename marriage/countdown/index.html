@@ -192,9 +192,8 @@
     }
     .chip .count { opacity: 0.75; font-size: 0.9em; margin-left: 4px; }
 
-    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .tag, .tag-input {
-      align-self: flex-start; margin-left: 40px;
+      justify-self: start; max-width: 100%; text-align: left;
       font: inherit; font-size: 0.85rem; letter-spacing: 0.04em;
       padding: 1px 10px; border-radius: 99px;
       border: 1px solid rgba(201, 160, 99, 0.45);
@@ -202,19 +201,27 @@
     }
     .tag { cursor: pointer; transition: background 0.2s; }
     .tag:hover { background: rgba(201, 160, 99, 0.22); }
-    .tag-input { outline: none; width: min(240px, 100% - 40px); }
+    .tag-input { outline: none; width: 100%; }
     .tag-input:focus { box-shadow: 0 0 0 3px rgba(201, 160, 99, 0.25); }
 
     ul.items { list-style: none; }
+    .list-head, .item {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 36%) 34px;
+      align-items: center; column-gap: 12px;
+    }
+    .list-head {
+      padding: 0 6px 6px; border-bottom: 1px solid var(--line);
+      font-size: 0.8rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+    }
+    .list-head span:first-child { padding-left: 40px; }
     .item {
-      display: flex; align-items: center; gap: 14px;
       padding: 12px 6px;
       border-bottom: 1px solid var(--line);
       animation: appear 0.35s ease;
     }
     .item:last-child { border-bottom: 0; }
     @keyframes appear { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-    .item label { display: flex; align-items: center; gap: 14px; flex: 1; cursor: pointer; min-width: 0; }
+    .item label { display: flex; align-items: center; gap: 14px; cursor: pointer; min-width: 0; }
     .item input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
     .box {
       flex: none; width: 26px; height: 26px; border-radius: 50%;
@@ -237,6 +244,15 @@
     @media (hover: none) { .del { opacity: 0.7; } }
     .sync-status { text-align: center; font-style: italic; font-size: 0.95rem; color: var(--muted); margin-top: 18px; min-height: 1.2em; }
     .sync-status[data-kind="err"] { color: var(--rose-deep); }
+    .done-wrap { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .done-wrap summary {
+      cursor: pointer; list-style: none; padding: 6px;
+      font-size: 1.15rem; color: var(--wine); display: flex; align-items: center; gap: 10px;
+    }
+    .done-wrap summary::-webkit-details-marker { display: none; }
+    .done-wrap summary::before { content: "›"; display: inline-block; transition: transform 0.2s; color: var(--rose-deep); font-size: 1.4rem; line-height: 1; }
+    .done-wrap[open] summary::before { transform: rotate(90deg); }
+    .done-wrap .count { color: var(--muted); font-style: italic; }
     .empty { text-align: center; color: var(--muted); font-style: italic; padding: 16px 0; }
 
     footer { text-align: center; padding: 0 16px 40px; color: var(--muted); font-style: italic; }
@@ -278,7 +294,13 @@
 
         <div class="filters" id="filters" role="group" aria-label="Filter by type"></div>
 
+        <div class="list-head" id="list-head"><span>Item</span><span>Type</span></div>
         <ul class="items" id="items"></ul>
+
+        <details class="done-wrap" id="done-wrap">
+          <summary>Done <span class="count" id="done-count"></span></summary>
+          <ul class="items" id="done-items"></ul>
+        </details>
         <p class="sync-status" id="sync-status" aria-live="polite"></p>
       </div>
     </section>
@@ -332,7 +354,7 @@
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
     function load() {
-      let items = null, types = [], filter = ALL, makeupMoved = false, syncedOnce = false;
+      let items = null, types = [], filter = ALL, makeupMoved = false, syncedOnce = false, doneOpen = false;
       try {
         const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
         if (Array.isArray(parsed)) {
@@ -343,6 +365,7 @@
           if (typeof parsed.filter === "string") filter = parsed.filter;
           makeupMoved = parsed.makeupMoved === true;
           syncedOnce = parsed.syncedOnce === true;
+          doneOpen = parsed.doneOpen === true;
         }
       } catch (e) { /* storage unavailable or corrupt: fall back to defaults */ }
       if (!items) { makeupMoved = true; items = DEFAULT_ITEMS.map(([text, type]) => ({ id: uid(), text, type, done: false })); }
@@ -352,7 +375,7 @@
       for (const it of items) {
         if (!types.some(t => t.toLowerCase() === it.type.toLowerCase())) types.push(it.type);
       }
-      return { items, types, filter, makeupMoved, syncedOnce };
+      return { items, types, filter, makeupMoved, syncedOnce, doneOpen };
     }
     function save() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -390,6 +413,14 @@
     const $typeList = document.getElementById("type-list");
     const $newItem = document.getElementById("new-item");
     const $newType = document.getElementById("new-type");
+    const $listHead = document.getElementById("list-head");
+    const $doneList = document.getElementById("done-items");
+    const $doneWrap = document.getElementById("done-wrap");
+    const $doneCount = document.getElementById("done-count");
+
+    // Remember on this device whether the Done list is expanded.
+    $doneWrap.open = state.doneOpen === true;
+    $doneWrap.addEventListener("toggle", () => { state.doneOpen = $doneWrap.open; save(); });
 
     function setFilter(f) {
       state.filter = f;
@@ -439,6 +470,47 @@
       input.focus(); input.select();
     }
 
+    function itemRow(item) {
+      const li = document.createElement("li");
+      li.className = "item" + (item.done ? " done" : "");
+
+      const label = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = item.done;
+      cb.addEventListener("change", () => {
+        item.done = cb.checked;
+        save(); render();
+        remote(() => db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
+      });
+      const box = document.createElement("span");
+      box.className = "box"; box.textContent = "✓";
+      const text = document.createElement("span");
+      text.className = "text"; text.textContent = item.text;
+      label.append(cb, box, text);
+
+      const tag = document.createElement("button");
+      tag.type = "button"; tag.className = "tag";
+      tag.textContent = item.type;
+      tag.title = "Change type";
+      tag.setAttribute("aria-label", `Type: ${item.type}. Click to change`);
+      tag.addEventListener("click", () => editType(item, tag));
+
+      const del = document.createElement("button");
+      del.className = "del"; del.type = "button";
+      del.setAttribute("aria-label", "Remove " + item.text);
+      del.textContent = "×";
+      del.addEventListener("click", () => {
+        if (!confirm('Remove "' + item.text + '" from the list?')) return;
+        state.items = state.items.filter(i => i.id !== item.id);
+        save(); render();
+        remote(() => db.from("checklist_items").delete().eq("id", item.id));
+      });
+
+      li.append(label, tag, del);
+      return li;
+    }
+
     function render() {
       // Types currently in use, in the order they were first added.
       const inUse = state.types.filter(t => state.items.some(i => i.type === t));
@@ -461,57 +533,24 @@
       }
       $filters.hidden = state.items.length === 0;
 
-      // Items.
+      // Items: still to do in the main list, finished ones in the expandable "Done" list.
       const visible = state.filter === ALL ? state.items : state.items.filter(i => i.type === state.filter);
+      const pending = visible.filter(i => !i.done);
+      const finished = visible.filter(i => i.done);
+
       $list.innerHTML = "";
-      if (!visible.length) {
-        $list.innerHTML = '<li class="empty">Nothing here yet — add your first item above.</li>';
+      if (!pending.length) {
+        $list.innerHTML = visible.length
+          ? '<li class="empty">Everything here is done ♡</li>'
+          : '<li class="empty">Nothing here yet — add your first item above.</li>';
       }
-      for (const item of visible) {
-        const li = document.createElement("li");
-        li.className = "item" + (item.done ? " done" : "");
+      for (const item of pending) $list.appendChild(itemRow(item));
+      $listHead.hidden = !pending.length;
 
-        const main = document.createElement("div");
-        main.className = "main";
-
-        const label = document.createElement("label");
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = item.done;
-        cb.addEventListener("change", () => {
-          item.done = cb.checked;
-          save(); render();
-          remote(() => db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
-        });
-        const box = document.createElement("span");
-        box.className = "box"; box.textContent = "✓";
-        const text = document.createElement("span");
-        text.className = "text"; text.textContent = item.text;
-        label.append(cb, box, text);
-
-        const tag = document.createElement("button");
-        tag.type = "button"; tag.className = "tag";
-        tag.textContent = item.type;
-        tag.title = "Change type";
-        tag.setAttribute("aria-label", `Type: ${item.type}. Click to change`);
-        tag.addEventListener("click", () => editType(item, tag));
-
-        main.append(label, tag);
-
-        const del = document.createElement("button");
-        del.className = "del"; del.type = "button";
-        del.setAttribute("aria-label", "Remove " + item.text);
-        del.textContent = "×";
-        del.addEventListener("click", () => {
-          if (!confirm('Remove "' + item.text + '" from the list?')) return;
-          state.items = state.items.filter(i => i.id !== item.id);
-          save(); render();
-          remote(() => db.from("checklist_items").delete().eq("id", item.id));
-        });
-
-        li.append(main, del);
-        $list.appendChild(li);
-      }
+      $doneList.innerHTML = "";
+      for (const item of finished) $doneList.appendChild(itemRow(item));
+      $doneCount.textContent = `(${finished.length})`;
+      $doneWrap.hidden = !finished.length;
 
       // Progress for the current view.
       const done = doneOf(visible);
