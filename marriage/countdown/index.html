@@ -158,9 +158,9 @@
       border-radius: inherit; transition: width 0.5s ease;
     }
 
-    .add { display: flex; gap: 10px; margin-bottom: 18px; }
+    .add { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
     .add input {
-      flex: 1; min-width: 0;
+      flex: 1 1 200px; min-width: 0;
       font: inherit; font-size: 1.15rem; color: var(--ink);
       padding: 12px 16px;
       border: 1px solid var(--line); border-radius: 14px;
@@ -170,13 +170,40 @@
     .add input:focus { border-color: var(--rose); box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.25); }
     .add button {
       font: inherit; font-size: 1.1rem; font-weight: 600;
-      padding: 0 20px; border: 0; border-radius: 14px; cursor: pointer;
+      flex: none; padding: 12px 22px; border: 0; border-radius: 14px; cursor: pointer;
       color: #fff; background: linear-gradient(135deg, var(--rose), var(--rose-deep));
       box-shadow: 0 6px 18px rgba(184, 92, 118, 0.3);
       transition: transform 0.15s;
     }
     .add button:hover { transform: translateY(-1px); }
     .add button:active { transform: translateY(1px); }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .chip {
+      font: inherit; font-size: 1rem; cursor: pointer;
+      padding: 5px 14px; border-radius: 99px;
+      border: 1px solid var(--line); background: rgba(255, 255, 255, 0.7);
+      color: var(--wine); transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .chip:hover { border-color: var(--rose); }
+    .chip[aria-pressed="true"] {
+      background: linear-gradient(135deg, var(--rose), var(--rose-deep));
+      color: #fff; border-color: transparent;
+    }
+    .chip .count { opacity: 0.75; font-size: 0.9em; margin-left: 4px; }
+
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .tag, .tag-input {
+      align-self: flex-start; margin-left: 40px;
+      font: inherit; font-size: 0.85rem; letter-spacing: 0.04em;
+      padding: 1px 10px; border-radius: 99px;
+      border: 1px solid rgba(201, 160, 99, 0.45);
+      background: rgba(201, 160, 99, 0.1); color: #8a6a3a;
+    }
+    .tag { cursor: pointer; transition: background 0.2s; }
+    .tag:hover { background: rgba(201, 160, 99, 0.22); }
+    .tag-input { outline: none; width: min(240px, 100% - 40px); }
+    .tag-input:focus { box-shadow: 0 0 0 3px rgba(201, 160, 99, 0.25); }
 
     ul.items { list-style: none; }
     .item {
@@ -242,8 +269,12 @@
 
         <form class="add" id="add-form" autocomplete="off">
           <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="120" aria-label="New checklist item" />
+          <input id="new-type" type="text" list="type-list" placeholder="Type, e.g. Marriage Essentials" maxlength="60" aria-label="Item type" />
           <button type="submit">Add</button>
         </form>
+        <datalist id="type-list"></datalist>
+
+        <div class="filters" id="filters" role="group" aria-label="Filter by type"></div>
 
         <ul class="items" id="items"></ul>
       </div>
@@ -278,47 +309,142 @@
 
     // ---------- Checklist (saved in this browser via localStorage) ----------
     const STORAGE_KEY = "kp-wedding-checklist-v1";
+    const ALL = "All";
+    const FALLBACK_TYPE = "General";
     const DEFAULT_ITEMS = [
-      "Pooja combined saree",
-      "Pooja blouse",
-      "Pooja earrings",
-      "Pooja sandal",
-      "Pooja makeup artist",
-      "Photographer",
-      "Morning band",
-      "Night dhol"
+      ["Pooja combined saree", "Pooja Varmala Outfit"],
+      ["Pooja blouse", "Pooja Varmala Outfit"],
+      ["Pooja earrings", "Pooja Varmala Outfit"],
+      ["Pooja sandal", "Pooja Varmala Outfit"],
+      ["Pooja makeup artist", "Marriage Essentials"],
+      ["Photographer", "Marriage Essentials"],
+      ["Morning band", "Marriage Essentials"],
+      ["Night dhol", "Marriage Essentials"]
     ];
+    const DEFAULT_TYPE_BY_TEXT = Object.fromEntries(DEFAULT_ITEMS.map(([t, ty]) => [t.toLowerCase(), ty]));
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
     function load() {
+      let items = null, types = [], filter = ALL;
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) return parsed;
+        const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+        if (Array.isArray(parsed)) {
+          items = parsed; // older format: plain list of items, no types yet
+        } else if (parsed && Array.isArray(parsed.items)) {
+          items = parsed.items;
+          if (Array.isArray(parsed.types)) types = parsed.types;
+          if (typeof parsed.filter === "string") filter = parsed.filter;
         }
       } catch (e) { /* storage unavailable or corrupt: fall back to defaults */ }
-      return DEFAULT_ITEMS.map(text => ({ id: uid(), text, done: false }));
+      if (!items) items = DEFAULT_ITEMS.map(([text, type]) => ({ id: uid(), text, type, done: false }));
+      for (const it of items) {
+        if (!it.type) it.type = DEFAULT_TYPE_BY_TEXT[String(it.text).toLowerCase()] || FALLBACK_TYPE;
+      }
+      for (const it of items) {
+        if (!types.some(t => t.toLowerCase() === it.type.toLowerCase())) types.push(it.type);
+      }
+      return { items, types, filter };
     }
     function save() {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch (e) { /* ignore */ }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
     }
 
-    let items = load();
+    const state = load();
     save();
+
+    // Reuse an existing type's spelling when it matches case-insensitively; remember new ones.
+    function canonicalType(raw) {
+      const t = (raw || "").trim().replace(/\s+/g, " ");
+      if (!t) return FALLBACK_TYPE;
+      const existing = state.types.find(x => x.toLowerCase() === t.toLowerCase());
+      if (existing) return existing;
+      state.types.push(t);
+      return t;
+    }
 
     const $list = document.getElementById("items");
     const $bar = document.getElementById("bar");
     const $progress = document.getElementById("progress-text");
+    const $filters = document.getElementById("filters");
+    const $typeList = document.getElementById("type-list");
+    const $newItem = document.getElementById("new-item");
+    const $newType = document.getElementById("new-type");
+
+    function setFilter(f) {
+      state.filter = f;
+      $newType.value = f === ALL ? "" : f;
+      save(); render();
+    }
+
+    function chip(label, value, done, total) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip";
+      b.setAttribute("aria-pressed", String(state.filter === value));
+      b.textContent = label;
+      const c = document.createElement("span");
+      c.className = "count"; c.textContent = `${done}/${total}`;
+      b.appendChild(c);
+      b.addEventListener("click", () => setFilter(value));
+      return b;
+    }
+
+    function editType(item, tagBtn) {
+      const input = document.createElement("input");
+      input.className = "tag-input"; input.type = "text";
+      input.setAttribute("list", "type-list");
+      input.setAttribute("aria-label", "Type for " + item.text);
+      input.maxLength = 60;
+      input.value = item.type;
+      let finished = false;
+      const finish = commit => {
+        if (finished) return;
+        finished = true;
+        if (commit) item.type = canonicalType(input.value);
+        save(); render();
+      };
+      input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); finish(true); }
+        else if (e.key === "Escape") finish(false);
+      });
+      input.addEventListener("blur", () => finish(true));
+      tagBtn.replaceWith(input);
+      input.focus(); input.select();
+    }
 
     function render() {
+      // Types currently in use, in the order they were first added.
+      const inUse = state.types.filter(t => state.items.some(i => i.type === t));
+      if (state.filter !== ALL && !inUse.includes(state.filter)) state.filter = ALL;
+
+      // Suggestions for the type fields.
+      $typeList.innerHTML = "";
+      for (const t of state.types) {
+        const o = document.createElement("option");
+        o.value = t; $typeList.appendChild(o);
+      }
+
+      // Filter chips.
+      $filters.innerHTML = "";
+      const doneOf = arr => arr.filter(i => i.done).length;
+      $filters.appendChild(chip(ALL, ALL, doneOf(state.items), state.items.length));
+      for (const t of inUse) {
+        const ofType = state.items.filter(i => i.type === t);
+        $filters.appendChild(chip(t, t, doneOf(ofType), ofType.length));
+      }
+      $filters.hidden = state.items.length === 0;
+
+      // Items.
+      const visible = state.filter === ALL ? state.items : state.items.filter(i => i.type === state.filter);
       $list.innerHTML = "";
-      if (!items.length) {
+      if (!visible.length) {
         $list.innerHTML = '<li class="empty">Nothing here yet — add your first item above.</li>';
       }
-      for (const item of items) {
+      for (const item of visible) {
         const li = document.createElement("li");
         li.className = "item" + (item.done ? " done" : "");
+
+        const main = document.createElement("div");
+        main.className = "main";
 
         const label = document.createElement("label");
         const cb = document.createElement("input");
@@ -334,37 +460,53 @@
         text.className = "text"; text.textContent = item.text;
         label.append(cb, box, text);
 
+        const tag = document.createElement("button");
+        tag.type = "button"; tag.className = "tag";
+        tag.textContent = item.type;
+        tag.title = "Change type";
+        tag.setAttribute("aria-label", `Type: ${item.type}. Click to change`);
+        tag.addEventListener("click", () => editType(item, tag));
+
+        main.append(label, tag);
+
         const del = document.createElement("button");
         del.className = "del"; del.type = "button";
         del.setAttribute("aria-label", "Remove " + item.text);
         del.textContent = "×";
         del.addEventListener("click", () => {
           if (!confirm('Remove "' + item.text + '" from the list?')) return;
-          items = items.filter(i => i.id !== item.id);
+          state.items = state.items.filter(i => i.id !== item.id);
           save(); render();
         });
 
-        li.append(label, del);
+        li.append(main, del);
         $list.appendChild(li);
       }
-      const done = items.filter(i => i.done).length;
-      $progress.textContent = items.length
-        ? `${done} of ${items.length} done` + (done === items.length ? " — all set! ♡" : "")
+
+      // Progress for the current view.
+      const done = doneOf(visible);
+      const scope = state.filter === ALL ? "" : ` in ${state.filter}`;
+      $progress.textContent = visible.length
+        ? `${done} of ${visible.length} done${scope}` + (done === visible.length ? " — all set! ♡" : "")
         : "";
-      $bar.style.width = items.length ? (done / items.length * 100) + "%" : "0";
+      $bar.style.width = visible.length ? (done / visible.length * 100) + "%" : "0";
     }
 
     document.getElementById("add-form").addEventListener("submit", e => {
       e.preventDefault();
-      const input = document.getElementById("new-item");
-      const text = input.value.trim();
-      if (!text) return;
-      items.push({ id: uid(), text, done: false });
+      const text = $newItem.value.trim();
+      if (!text) { $newItem.focus(); return; }
+      const type = canonicalType($newType.value || (state.filter !== ALL ? state.filter : ""));
+      state.items.push({ id: uid(), text, type, done: false });
+      // Keep the new item visible if a different type is filtered.
+      if (state.filter !== ALL && state.filter !== type) state.filter = type;
+      $newType.value = state.filter === ALL ? "" : state.filter;
       save(); render();
-      input.value = "";
-      input.focus();
+      $newItem.value = "";
+      $newItem.focus();
     });
 
+    if (state.filter !== ALL) $newType.value = state.filter;
     render();
 
     // ---------- Petals ----------
