@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Karan &amp; Pooja · Wedding</title>
+  <meta name="description" content="Counting down to Karan and Pooja's wedding on 24 January 2027." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --blush: #f9e4e8;
+      --rose: #e8a9b8;
+      --rose-deep: #b85c76;
+      --wine: #6e2a40;
+      --gold: #c9a063;
+      --cream: #fffaf6;
+      --ink: #4a2a35;
+      --muted: #8c6a75;
+      --card: rgba(255, 250, 246, 0.72);
+      --line: rgba(184, 92, 118, 0.22);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      min-height: 100vh;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 20% 10%, #fde8ef 0%, transparent 55%),
+        radial-gradient(ellipse at 85% 30%, #f3e1f5 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 100%, #fbe3d9 0%, transparent 60%),
+        linear-gradient(160deg, #fff5f7 0%, #fbeaf0 45%, #f6e6f3 100%);
+      background-attachment: fixed;
+      overflow-x: hidden;
+    }
+
+    /* floating petals */
+    .petals { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+    .petal {
+      position: absolute; top: -40px;
+      width: 14px; height: 18px;
+      background: linear-gradient(135deg, #f7c5d2, #e8a9b8);
+      border-radius: 80% 0 80% 0;
+      opacity: 0.55;
+      animation: fall linear infinite;
+    }
+    .petal.heart { background: none; width: auto; height: auto; color: #e8a9b8; font-size: 16px; border-radius: 0; }
+    @keyframes fall {
+      0%   { transform: translate3d(0, -40px, 0) rotate(0deg); }
+      50%  { transform: translate3d(40px, 50vh, 0) rotate(180deg); }
+      100% { transform: translate3d(-20px, 110vh, 0) rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) { .petal { display: none; } }
+
+    main { position: relative; z-index: 1; }
+
+    /* hero */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center;
+      padding: 48px 16px;
+    }
+    .eyebrow {
+      letter-spacing: 0.35em; text-transform: uppercase;
+      font-size: 0.85rem; color: var(--muted);
+    }
+    .names {
+      font-family: "Great Vibes", cursive;
+      font-weight: 400;
+      font-size: clamp(3.2rem, 11vw, 6.5rem);
+      line-height: 1.1;
+      color: var(--rose-deep);
+      margin: 8px 0 4px;
+      text-shadow: 0 4px 24px rgba(232, 169, 184, 0.45);
+    }
+    .names .amp { color: var(--gold); padding: 0 0.15em; }
+    .date {
+      font-size: clamp(1.1rem, 3vw, 1.4rem);
+      font-style: italic; color: var(--wine);
+    }
+    .divider {
+      display: flex; align-items: center; gap: 12px;
+      margin: 28px auto; color: var(--gold);
+      width: min(320px, 80%);
+    }
+    .divider::before, .divider::after {
+      content: ""; flex: 1; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    }
+
+    .timer {
+      display: flex; justify-content: center; align-items: flex-start;
+      gap: clamp(8px, 3vw, 36px);
+    }
+    .unit {
+      display: flex; flex-direction: column; align-items: center;
+      min-width: clamp(84px, 24vw, 220px);
+    }
+    .num {
+      font-family: "Cormorant Garamond", serif;
+      font-weight: 500;
+      font-size: clamp(4.2rem, 17vw, 11rem);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      background: linear-gradient(180deg, var(--rose-deep) 0%, var(--wine) 100%);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 6px 18px rgba(184, 92, 118, 0.25));
+    }
+    .label {
+      margin-top: 10px;
+      letter-spacing: 0.3em; text-transform: uppercase;
+      font-size: clamp(0.75rem, 2vw, 1rem); color: var(--muted);
+    }
+    .sep {
+      font-size: clamp(3rem, 12vw, 8rem); line-height: 1;
+      color: var(--rose); opacity: 0.6;
+      animation: beat 2s ease-in-out infinite;
+    }
+    @keyframes beat { 0%,100% { opacity: 0.35; } 50% { opacity: 0.8; } }
+    .married {
+      font-family: "Great Vibes", cursive;
+      font-size: clamp(2.6rem, 9vw, 5rem);
+      color: var(--rose-deep);
+    }
+    .scroll-hint {
+      margin-top: 48px; color: var(--muted); text-decoration: none;
+      font-size: 0.95rem; letter-spacing: 0.15em;
+      animation: bob 2.4s ease-in-out infinite;
+    }
+    @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+
+    /* checklist */
+    .checklist-wrap { padding: 24px 16px 96px; display: flex; justify-content: center; }
+    .card {
+      width: 100%; max-width: 620px;
+      background: var(--card);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 28px;
+      box-shadow: 0 20px 60px rgba(184, 92, 118, 0.15);
+      padding: clamp(24px, 5vw, 44px);
+    }
+    .card h2 {
+      font-family: "Great Vibes", cursive; font-weight: 400;
+      font-size: clamp(2.4rem, 7vw, 3.2rem);
+      color: var(--rose-deep); text-align: center; line-height: 1.1;
+    }
+    .progress-text { text-align: center; color: var(--muted); font-style: italic; margin: 6px 0 14px; font-size: 1.1rem; }
+    .bar { height: 6px; border-radius: 99px; background: var(--blush); overflow: hidden; margin-bottom: 24px; }
+    .bar > span {
+      display: block; height: 100%; width: 0;
+      background: linear-gradient(90deg, var(--rose), var(--rose-deep));
+      border-radius: inherit; transition: width 0.5s ease;
+    }
+
+    .add { display: flex; gap: 10px; margin-bottom: 18px; }
+    .add input {
+      flex: 1; min-width: 0;
+      font: inherit; font-size: 1.15rem; color: var(--ink);
+      padding: 12px 16px;
+      border: 1px solid var(--line); border-radius: 14px;
+      background: rgba(255, 255, 255, 0.85);
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .add input:focus { border-color: var(--rose); box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.25); }
+    .add button {
+      font: inherit; font-size: 1.1rem; font-weight: 600;
+      padding: 0 20px; border: 0; border-radius: 14px; cursor: pointer;
+      color: #fff; background: linear-gradient(135deg, var(--rose), var(--rose-deep));
+      box-shadow: 0 6px 18px rgba(184, 92, 118, 0.3);
+      transition: transform 0.15s;
+    }
+    .add button:hover { transform: translateY(-1px); }
+    .add button:active { transform: translateY(1px); }
+
+    ul.items { list-style: none; }
+    .item {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 6px;
+      border-bottom: 1px solid var(--line);
+      animation: appear 0.35s ease;
+    }
+    .item:last-child { border-bottom: 0; }
+    @keyframes appear { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    .item label { display: flex; align-items: center; gap: 14px; flex: 1; cursor: pointer; min-width: 0; }
+    .item input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+    .box {
+      flex: none; width: 26px; height: 26px; border-radius: 50%;
+      border: 1.5px solid var(--rose);
+      display: grid; place-items: center;
+      background: #fff; transition: background 0.25s, border-color 0.25s;
+      color: transparent; font-size: 14px;
+    }
+    .item input:checked + .box { background: var(--rose-deep); border-color: var(--rose-deep); color: #fff; }
+    .item input:focus-visible + .box { box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.4); }
+    .text { font-size: 1.25rem; overflow-wrap: anywhere; transition: color 0.25s; }
+    .item.done .text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--rose); }
+    .del {
+      flex: none; border: 0; background: none; cursor: pointer;
+      color: var(--muted); font-size: 1.4rem; line-height: 1; padding: 4px 8px; border-radius: 8px;
+      opacity: 0.45; transition: opacity 0.2s, color 0.2s;
+    }
+    .item:hover .del, .del:focus-visible { opacity: 1; }
+    .del:hover { color: var(--rose-deep); }
+    @media (hover: none) { .del { opacity: 0.7; } }
+    .empty { text-align: center; color: var(--muted); font-style: italic; padding: 16px 0; }
+
+    footer { text-align: center; padding: 0 16px 40px; color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="petals" aria-hidden="true"></div>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Counting down to forever</p>
+      <h1 class="names">Karan<span class="amp">&amp;</span>Pooja</h1>
+      <p class="date">Sunday, 24 January 2027</p>
+      <div class="divider">❦</div>
+
+      <div id="timer" class="timer" role="timer" aria-live="off">
+        <div class="unit"><span class="num" id="d">--</span><span class="label">Days</span></div>
+        <span class="sep">·</span>
+        <div class="unit"><span class="num" id="h">--</span><span class="label">Hours</span></div>
+        <span class="sep">·</span>
+        <div class="unit"><span class="num" id="m">--</span><span class="label">Minutes</span></div>
+      </div>
+
+      <a class="scroll-hint" href="#checklist">our wedding checklist ↓</a>
+    </section>
+
+    <section class="checklist-wrap" id="checklist">
+      <div class="card">
+        <h2>Wedding Checklist</h2>
+        <p class="progress-text" id="progress-text"></p>
+        <div class="bar"><span id="bar"></span></div>
+
+        <form class="add" id="add-form" autocomplete="off">
+          <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="120" aria-label="New checklist item" />
+          <button type="submit">Add</button>
+        </form>
+
+        <ul class="items" id="items"></ul>
+      </div>
+    </section>
+
+    <footer>made with love ♡</footer>
+  </main>
+
+  <script>
+    // ---------- Countdown ----------
+    // Wedding day starts at midnight India time (IST, UTC+05:30).
+    const WEDDING = new Date("2027-01-24T00:00:00+05:30").getTime();
+    const $d = document.getElementById("d");
+    const $h = document.getElementById("h");
+    const $m = document.getElementById("m");
+    const pad = n => String(n).padStart(2, "0");
+
+    function tick() {
+      const diff = WEDDING - Date.now();
+      if (diff <= 0) {
+        document.getElementById("timer").innerHTML = '<p class="married">Today we say forever ♡</p>';
+        clearInterval(timerId);
+        return;
+      }
+      const totalMin = Math.floor(diff / 60000);
+      $d.textContent = Math.floor(totalMin / 1440);
+      $h.textContent = pad(Math.floor((totalMin % 1440) / 60));
+      $m.textContent = pad(totalMin % 60);
+    }
+    const timerId = setInterval(tick, 1000);
+    tick();
+
+    // ---------- Checklist (saved in this browser via localStorage) ----------
+    const STORAGE_KEY = "kp-wedding-checklist-v1";
+    const DEFAULT_ITEMS = [
+      "Pooja combined saree",
+      "Pooja blouse",
+      "Pooja earrings",
+      "Pooja sandal",
+      "Pooja makeup artist",
+      "Photographer",
+      "Morning band",
+      "Night dhol"
+    ];
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+    function load() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) { /* storage unavailable or corrupt: fall back to defaults */ }
+      return DEFAULT_ITEMS.map(text => ({ id: uid(), text, done: false }));
+    }
+    function save() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch (e) { /* ignore */ }
+    }
+
+    let items = load();
+    save();
+
+    const $list = document.getElementById("items");
+    const $bar = document.getElementById("bar");
+    const $progress = document.getElementById("progress-text");
+
+    function render() {
+      $list.innerHTML = "";
+      if (!items.length) {
+        $list.innerHTML = '<li class="empty">Nothing here yet — add your first item above.</li>';
+      }
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.className = "item" + (item.done ? " done" : "");
+
+        const label = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = item.done;
+        cb.addEventListener("change", () => {
+          item.done = cb.checked;
+          save(); render();
+        });
+        const box = document.createElement("span");
+        box.className = "box"; box.textContent = "✓";
+        const text = document.createElement("span");
+        text.className = "text"; text.textContent = item.text;
+        label.append(cb, box, text);
+
+        const del = document.createElement("button");
+        del.className = "del"; del.type = "button";
+        del.setAttribute("aria-label", "Remove " + item.text);
+        del.textContent = "×";
+        del.addEventListener("click", () => {
+          if (!confirm('Remove "' + item.text + '" from the list?')) return;
+          items = items.filter(i => i.id !== item.id);
+          save(); render();
+        });
+
+        li.append(label, del);
+        $list.appendChild(li);
+      }
+      const done = items.filter(i => i.done).length;
+      $progress.textContent = items.length
+        ? `${done} of ${items.length} done` + (done === items.length ? " — all set! ♡" : "")
+        : "";
+      $bar.style.width = items.length ? (done / items.length * 100) + "%" : "0";
+    }
+
+    document.getElementById("add-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const input = document.getElementById("new-item");
+      const text = input.value.trim();
+      if (!text) return;
+      items.push({ id: uid(), text, done: false });
+      save(); render();
+      input.value = "";
+      input.focus();
+    });
+
+    render();
+
+    // ---------- Petals ----------
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const wrap = document.querySelector(".petals");
+      const count = window.innerWidth < 600 ? 14 : 26;
+      for (let i = 0; i < count; i++) {
+        const p = document.createElement("span");
+        const heart = Math.random() < 0.25;
+        p.className = "petal" + (heart ? " heart" : "");
+        if (heart) p.textContent = "♡";
+        p.style.left = Math.random() * 100 + "vw";
+        p.style.animationDuration = 10 + Math.random() * 14 + "s";
+        p.style.animationDelay = -Math.random() * 20 + "s";
+        const s = 0.6 + Math.random() * 0.8;
+        p.style.scale = s;
+        wrap.appendChild(p);
+      }
+    }
+  </script>
+</body>
+</html>
