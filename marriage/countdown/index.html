@@ -316,7 +316,7 @@
       ["Pooja blouse", "Pooja Varmala Outfit"],
       ["Pooja earrings", "Pooja Varmala Outfit"],
       ["Pooja sandal", "Pooja Varmala Outfit"],
-      ["Pooja makeup artist", "Marriage Essentials"],
+      ["Pooja makeup artist", "Pooja Varmala Outfit"],
       ["Photographer", "Marriage Essentials"],
       ["Morning band", "Marriage Essentials"],
       ["Night dhol", "Marriage Essentials"]
@@ -325,7 +325,7 @@
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
     function load() {
-      let items = null, types = [], filter = ALL;
+      let items = null, types = [], filter = ALL, makeupMoved = false;
       try {
         const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
         if (Array.isArray(parsed)) {
@@ -334,22 +334,33 @@
           items = parsed.items;
           if (Array.isArray(parsed.types)) types = parsed.types;
           if (typeof parsed.filter === "string") filter = parsed.filter;
+          makeupMoved = parsed.makeupMoved === true;
         }
       } catch (e) { /* storage unavailable or corrupt: fall back to defaults */ }
-      if (!items) items = DEFAULT_ITEMS.map(([text, type]) => ({ id: uid(), text, type, done: false }));
+      if (!items) { makeupMoved = true; items = DEFAULT_ITEMS.map(([text, type]) => ({ id: uid(), text, type, done: false })); }
       for (const it of items) {
         if (!it.type) it.type = DEFAULT_TYPE_BY_TEXT[String(it.text).toLowerCase()] || FALLBACK_TYPE;
       }
       for (const it of items) {
         if (!types.some(t => t.toLowerCase() === it.type.toLowerCase())) types.push(it.type);
       }
-      return { items, types, filter };
+      return { items, types, filter, makeupMoved };
     }
     function save() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
     }
 
     const state = load();
+
+    // One-time fix for lists saved earlier: makeup artist belongs with Pooja's outfit.
+    if (!state.makeupMoved) {
+      for (const it of state.items) {
+        if (String(it.text).toLowerCase() === "pooja makeup artist" && it.type === "Marriage Essentials") {
+          it.type = "Pooja Varmala Outfit";
+        }
+      }
+      state.makeupMoved = true;
+    }
     save();
 
     const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
