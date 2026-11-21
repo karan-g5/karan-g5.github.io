@@ -231,6 +231,12 @@
       color: transparent; font-size: 14px;
     }
     .item input:checked + .box { background: var(--rose-deep); border-color: var(--rose-deep); color: #fff; }
+    .item.progress { background: linear-gradient(90deg, rgba(201, 160, 99, 0.14), rgba(201, 160, 99, 0.04)); }
+    .item.progress .box { border-color: var(--gold); background: linear-gradient(90deg, var(--gold) 50%, #fff 50%); }
+    .item.progress .text::after {
+      content: "in progress"; display: block; font-size: 0.85rem; font-weight: 400;
+      font-style: italic; color: #8a6a3a; letter-spacing: 0.02em;
+    }
     .item input:focus-visible + .box { box-shadow: 0 0 0 4px rgba(232, 169, 184, 0.4); }
     .text { font-size: 1.35rem; font-weight: 600; line-height: 1.25; color: var(--ink); overflow-wrap: break-word; transition: color 0.25s; }
     .handle {
@@ -329,7 +335,7 @@
         <div class="bar"><span id="bar"></span></div>
 
         <form class="add" id="add-form" autocomplete="off">
-          <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="120" autocapitalize="sentences" aria-label="New checklist item" />
+          <input id="new-item" type="text" placeholder="Add something to the list…" maxlength="119" autocapitalize="sentences" aria-label="New checklist item" />
           <input id="new-type" type="text" list="type-list" placeholder="Type, e.g. Marriage Essentials" maxlength="60" autocapitalize="words" aria-label="Item type" />
           <button type="submit">Add</button>
         </form>
@@ -414,6 +420,19 @@
     try { unlocked = sessionStorage.getItem(PW_KEY) === "1"; } catch (e) { /* ignore */ }
     const isPrivate = item => item.type === PRIVATE_TYPE;
     const allItems = () => unlocked ? state.items : state.items.filter(i => !isPrivate(i));
+
+    // "In progress" is stored as an invisible marker at the start of the item's text,
+    // so no extra database column is needed. fromRow/toRow translate to and from the database.
+    const PROGRESS_MARK = "\u2063";
+    const fromRow = r => ({
+      id: r.id, type: r.type, done: r.done, created_at: r.created_at,
+      text: r.text.replace(/^\u2063/, ""),
+      progress: !r.done && r.text.startsWith(PROGRESS_MARK)
+    });
+    const toRow = i => ({
+      id: i.id, type: i.type, done: i.done, created_at: i.created_at,
+      text: (i.progress && !i.done ? PROGRESS_MARK : "") + i.text
+    });
 
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -553,7 +572,7 @@
       if (state.items.map(i => i.id).join() === before) return;
       state.items.forEach((i, n) => { i.created_at = new Date(ORDER_BASE + n * 1000).toISOString(); });
       save(); render();
-      const rows = state.items.map(i => ({ id: i.id, text: i.text, type: i.type, done: i.done, created_at: i.created_at }));
+      const rows = state.items.map(toRow);
       remote(() => db.from("checklist_items").upsert(rows, { onConflict: "id" }));
     }
 
@@ -603,7 +622,7 @@
 
     function itemRow(item, sortable) {
       const li = document.createElement("li");
-      li.className = "item" + (item.done ? " done" : "");
+      li.className = "item" + (item.done ? " done" : item.progress ? " progress" : "");
       li.dataset.id = item.id;
 
       let grip;
@@ -622,10 +641,15 @@
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = item.done;
+      cb.indeterminate = !item.done && !!item.progress;
+      cb.title = item.done ? "Done — tap to reopen" : item.progress ? "In progress — tap to mark done" : "Tap to mark in progress";
       cb.addEventListener("change", () => {
-        item.done = cb.checked;
+        // Cycle: to do → in progress → done → to do.
+        if (item.done) { item.done = false; item.progress = false; }
+        else if (item.progress) { item.done = true; item.progress = false; }
+        else { item.progress = true; }
         save(); render();
-        remote(() => db.from("checklist_items").update({ done: item.done, updated_at: new Date().toISOString() }).eq("id", item.id));
+        remote(() => db.from("checklist_items").update({ done: item.done, text: toRow(item).text, updated_at: new Date().toISOString() }).eq("id", item.id));
       });
       const box = document.createElement("span");
       box.className = "box"; box.textContent = "✓";
@@ -700,9 +724,10 @@
 
       // Progress for the current view.
       const done = doneOf(visible);
+      const inProgress = visible.filter(i => !i.done && i.progress).length;
       const scope = state.filter === ALL ? "" : ` in ${state.filter}`;
       $progress.textContent = visible.length
-        ? `${done} of ${visible.length} done${scope}` + (done === visible.length ? " — all set! ♡" : "")
+        ? `${done} of ${visible.length} done${scope}` + (inProgress ? ` · ${inProgress} in progress` : "") + (done === visible.length ? " — all set! ♡" : "")
         : "";
       $bar.style.width = visible.length ? (done / visible.length * 100) + "%" : "0";
     }
@@ -715,7 +740,7 @@
       const item = { id: uid(), text, type, done: false, created_at: new Date().toISOString() };
       if (type === PRIVATE_TYPE && !unlocked) { setStatus("err", "That type isn't available"); return; }
       state.items.push(item);
-      remote(() => db.from("checklist_items").insert(item));
+      remote(() => db.from("checklist_items").insert(toRow(item)));
       // Keep the new item visible if a different type is filtered.
       if (state.filter !== ALL && state.filter !== type) state.filter = type;
       $newType.value = state.filter === ALL ? "" : state.filter;
@@ -747,7 +772,7 @@
       ]);
       if (it.error) throw it.error;
       if (ty.error) throw ty.error;
-      return { items: it.data, types: ty.data.map(t => t.name) };
+      return { items: it.data.map(fromRow), types: ty.data.map(t => t.name) };
     }
 
     let pulling = false, pullAgain = false;
@@ -766,7 +791,7 @@
           let r = await db.from("checklist_types").upsert(types.map(name => ({ name })), { onConflict: "name", ignoreDuplicates: true });
           if (r.error) throw r.error;
           r = await db.from("checklist_items").upsert(
-            state.items.map((i, n) => ({ id: i.id, text: i.text, type: i.type, done: i.done, created_at: new Date(base + n).toISOString() })),
+            state.items.map((i, n) => toRow({ ...i, created_at: new Date(base + n).toISOString() })),
             { onConflict: "id" });
           if (r.error) throw r.error;
           data = await fetchRemote();
